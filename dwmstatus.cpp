@@ -21,9 +21,7 @@ char *tzgmt = (char*)"Europe/London";
 
 static Display *dpy;
 
-char *
-smprintf(char *fmt, ...)
-{
+char * smprintf(char *fmt, ...){
 	va_list fmtargs;
 	char *ret;
 	int len;
@@ -45,15 +43,78 @@ smprintf(char *fmt, ...)
 	return ret;
 }
 
-void
-settz(char *tzname)
-{
+void settz(char *tzname){
 	setenv((char*)"TZ", tzname, 1);
 }
 
-char *
-mktimes(char *fmt, char *tzname)
-{
+int parse_netdev(unsigned long long int *receivedabs, unsigned long long int *sentabs){
+	char buf[255];
+	char *datastart;
+	static int bufsize;
+	int rval;
+	FILE *devfd;
+	unsigned long long int receivedacc, sentacc;
+
+	bufsize = 255;
+	devfd = fopen("/proc/net/dev", "r");
+	rval = 1;
+
+	// Ignore the first two lines of the file
+	fgets(buf, bufsize, devfd);
+	fgets(buf, bufsize, devfd);
+
+	while (fgets(buf, bufsize, devfd)) {
+	    if ((datastart = strstr(buf, "lo:")) == NULL) {
+		datastart = strstr(buf, ":");
+
+		// With thanks to the conky project at http://conky.sourceforge.net/
+		sscanf(datastart + 1, "%llu  %*d     %*d  %*d  %*d  %*d   %*d        %*d       %llu",\
+		       &receivedacc, &sentacc);
+		*receivedabs += receivedacc;
+		*sentabs += sentacc;
+		rval = 0;
+	    }
+	}
+
+	fclose(devfd);
+	return rval;
+}
+
+void calculate_speed(char *speedstr, unsigned long long int newval, unsigned long long int oldval){
+	double speed;
+	speed = (newval - oldval) / 1024.0;
+	if (speed > 1024.0) {
+	    speed /= 1024.0;
+	    sprintf(speedstr, "%.3f MB/s", speed);
+	} else {
+	    sprintf(speedstr, "%.2f KB/s", speed);
+	}
+}
+
+char * get_netusage(unsigned long long int *rec, unsigned long long int *sent){
+	unsigned long long int newrec, newsent;
+	newrec = newsent = 0;
+	char downspeedstr[15], upspeedstr[15];
+	static char retstr[42];
+	int retval;
+
+	retval = parse_netdev(&newrec, &newsent);
+	if (retval) {
+	    fprintf(stdout, "Error when parsing /proc/net/dev file.\n");
+	    exit(1);
+	}
+
+	calculate_speed(downspeedstr, newrec, *rec);
+	calculate_speed(upspeedstr, newsent, *sent);
+
+	sprintf(retstr, "down: %s up: %s", downspeedstr, upspeedstr);
+
+	*rec = newrec;
+	*sent = newsent;
+	return retstr;
+}
+
+char * mktimes(char *fmt, char *tzname){
 	char buf[129];
 	time_t tim;
 	struct tm *timtm;
@@ -72,16 +133,12 @@ mktimes(char *fmt, char *tzname)
 	return smprintf((char*)"%s", buf);
 }
 
-void
-setstatus(char *str)
-{
+void setstatus(char *str){
 	XStoreName(dpy, DefaultRootWindow(dpy), str);
 	XSync(dpy, False);
 }
 
-char *
-readfile(char *base, char *file)
-{
+char * readfile(char *base, char *file){
 	char *path, line[513];
 	FILE *fd;
 
@@ -100,9 +157,7 @@ readfile(char *base, char *file)
 	return smprintf((char*)"%s", line);
 }
 
-char *
-getbattery(char *base)
-{
+char * getbattery(char *base){
 	char *co, status;
 	int descap, remcap;
 
@@ -151,25 +206,30 @@ getbattery(char *base)
 	return smprintf((char*)"%.0f%%", ((float)remcap / (float)descap) * 100, status);
 }
 
-int
-main(void)
-{
+int main(void){
 	char *status;
 	char *bat;
 	char *tmlndn;
+	char *netstats;
+	static unsigned long long int rec, sent;
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, (char*)"dwmstatus: cannot open display.\n");
 		return 1;
 	}
 
+	parse_netdev(&rec, &sent);
+
 	for (;;sleep(60)) {
 		bat = getbattery((char*)"/sys/class/power_supply/BAT0");
 		tmlndn = mktimes((char*)"Date: %a %d %b | Time: %H:%M %Y", tzgmt);
+		netstats = get_netusage(&rec, &sent);
 
-		status = smprintf((char*)"Battery: %s | %s",
-				bat, tmlndn);
+		status = smprintf((char*)"Battery: %s | %s | Internet: %s",
+				bat, tmlndn, netstats);
+
 		setstatus(status);
+		free(netstats);
 		free(bat);
 		free(status);
 		free(tmlndn);
