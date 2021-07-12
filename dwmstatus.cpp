@@ -143,20 +143,15 @@ int main(void){
 	char *status;
 	char *bat;
 	char *tmlndn;
-	char *netstats;
-	static unsigned long long int rec, sent;
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, (char*)"dwmstatus: cannot open display.\n");
 		return 1;
 	}
 
-	parse_netdev(&rec, &sent);
-
 	for (;;sleep(60)) {
 		bat = getbattery((char*)"/sys/class/power_supply/BAT0");
 		tmlndn = mktimes((char*)"Date: %a %d %b | Time: %H:%M %Y", tzgmt);
-		netstats = get_netusage(&rec, &sent);
 
 		status = smprintf((char*)"Battery: %s | %s",
 				bat, tmlndn);
