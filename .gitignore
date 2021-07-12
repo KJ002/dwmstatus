@@ -1,0 +1,8 @@
+*
+!*.c
+!*.h
+!*.cpp
+!*.hpp
+!Makefile
+!.gitignore
+!LICENSE
